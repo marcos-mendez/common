@@ -1,0 +1,24 @@
+#!/bin/bash -ex
+# TurnKey Linux - Redis server configuration
+#
+# Usage in appliance conf.d/main:
+#   source /turnkey/fab/common/conf/redis
+#
+# [Marcos Méndez @ POPSOLUTIONS <https://github.com/marcos-mendez>]
+
+# Sane defaults for appliance use
+REDIS_CONF=/etc/redis/redis.conf
+
+# Bind to localhost only (appliance-level security)
+sed -i 's/^bind .*/bind 127.0.0.1 ::1/' $REDIS_CONF
+
+# Disable protected mode (already bound to localhost)
+sed -i 's/^protected-mode yes/protected-mode no/' $REDIS_CONF
+
+# Memory policy: evict least recently used keys when maxmemory is hit
+sed -i 's/^# maxmemory-policy .*/maxmemory-policy allkeys-lru/' $REDIS_CONF
+
+# Enable systemd supervision
+sed -i 's/^supervised no/supervised systemd/' $REDIS_CONF
+
+systemctl enable redis-server
