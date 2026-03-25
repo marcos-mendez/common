@@ -1,0 +1,29 @@
+turnkey-ruby (1:18.0-0) turnkey; urgency=low
+
+  * Initial Ruby vertical for TurnKey Linux common.
+
+  * rbenv + ruby-build installed to /usr/local/rbenv with jemalloc support.
+
+  * System-wide rbenv availability via /etc/profile.d/rbenv.sh
+    (works for all users, not just root).
+
+  * Build-time conf/ruby script: sources by appliance conf.d/main with
+    RUBY_VERSION variable to compile the required version.
+
+  * Runtime tkl-upgrade-ruby helper script:
+    - Interactive and non-interactive modes.
+    - Auto-detects .ruby-version from known app paths
+      (Mastodon, Rails, Redmine).
+    - Updates ruby-build definitions before install.
+    - Compiles with jemalloc and parallel make.
+    - Cleanup command to remove old versions.
+
+  * Extracted and generalized from conf/rails (which hardcoded
+    RBY_VER=2.7.6 with no upgrade path).
+
+  * Appliances using this vertical: conf/rails (refactored),
+    Mastodon (new), Redmine (future).
+
+  [Marcos Méndez @ POPSOLUTIONS <https://github.com/marcos-mendez>]
+
+ -- Marcos Mendez <m@pop.coop>  Tue, 25 Mar 2026 00:00:00 -0300
