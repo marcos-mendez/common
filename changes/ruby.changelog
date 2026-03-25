@@ -1,4 +1,4 @@
-turnkey-ruby (1:19.0-0) turnkey; urgency=low
+turnkey-ruby (1:18.0-0) turnkey; urgency=low
 
   * Initial Ruby vertical for TurnKey Linux common.
 
@@ -26,4 +26,4 @@ turnkey-ruby (1:19.0-0) turnkey; urgency=low
 
   [Marcos Méndez @ POPSOLUTIONS <https://github.com/marcos-mendez>]
 
- -- Marcos Mendez <m@pop.coop>  Wed, 25 Mar 2026 00:00:00 -0300
+ -- Marcos Mendez <m@pop.coop>  Tue, 25 Mar 2026 00:00:00 -0300

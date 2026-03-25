@@ -1,0 +1,14 @@
+#include <turnkey/base>
+build-essential
+libyaml-dev
+libssl-dev
+libreadline-dev
+zlib1g-dev
+libffi-dev
+libgdbm-dev
+libncurses5-dev
+libjemalloc-dev
+autoconf
+bison
+rustc
+git

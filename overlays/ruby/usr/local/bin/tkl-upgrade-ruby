@@ -1,0 +1,275 @@
+#!/bin/bash
+#
+# tkl-upgrade-ruby - TurnKey Linux Ruby version upgrade helper
+#
+# Upgrades Ruby installed via rbenv to a specified version.
+# Can auto-detect the required version from a .ruby-version file
+# (standard in Rails, Mastodon, Redmine, etc.)
+#
+# Usage:
+#   tkl-upgrade-ruby                      # interactive mode
+#   tkl-upgrade-ruby 3.4.7               # install specific version
+#   tkl-upgrade-ruby --app /path/to/app  # read from .ruby-version
+#   tkl-upgrade-ruby --list              # list installed versions
+#   tkl-upgrade-ruby --available         # list available versions
+#   tkl-upgrade-ruby --cleanup           # remove old versions
+#
+# [Marcos Méndez @ POPSOLUTIONS <https://github.com/marcos-mendez>]
+
+set -e
+
+RBENV_ROOT=/usr/local/rbenv
+RUBY_BUILD_DIR="$RBENV_ROOT/plugins/ruby-build"
+BOLD='\033[1m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+RED='\033[0;31m'
+NC='\033[0m'
+
+fatal() {
+    echo -e "${RED}Error: $1${NC}" >&2
+    exit 1
+}
+
+info() {
+    echo -e "${GREEN}$1${NC}"
+}
+
+warn() {
+    echo -e "${YELLOW}$1${NC}"
+}
+
+header() {
+    echo -e "${BOLD}$1${NC}"
+}
+
+check_root() {
+    if [ "$(id -u)" -ne 0 ]; then
+        fatal "This script must be run as root."
+    fi
+}
+
+check_rbenv() {
+    if [ ! -d "$RBENV_ROOT" ]; then
+        fatal "rbenv not found at $RBENV_ROOT. Is this a TurnKey appliance with Ruby?"
+    fi
+    export RBENV_ROOT
+    export PATH="$RBENV_ROOT/bin:$PATH"
+    eval "$(rbenv init -)"
+}
+
+get_current_version() {
+    rbenv version | awk '{print $1}'
+}
+
+get_app_version() {
+    local app_path="$1"
+    if [ -f "$app_path/.ruby-version" ]; then
+        cat "$app_path/.ruby-version" | tr -d '[:space:]'
+    else
+        echo ""
+    fi
+}
+
+update_ruby_build() {
+    header "Updating ruby-build definitions..."
+    if [ -d "$RUBY_BUILD_DIR/.git" ]; then
+        git -C "$RUBY_BUILD_DIR" pull --quiet
+        info "ruby-build updated."
+    else
+        fatal "ruby-build not found at $RUBY_BUILD_DIR"
+    fi
+}
+
+list_installed() {
+    header "Installed Ruby versions:"
+    rbenv versions
+}
+
+list_available() {
+    update_ruby_build
+    header "Available stable Ruby versions (3.x):"
+    rbenv install --list 2>/dev/null | grep '^\s*3\.' | tail -20
+}
+
+install_ruby() {
+    local target_ver="$1"
+
+    if [ -z "$target_ver" ]; then
+        fatal "No target version specified."
+    fi
+
+    local current_ver
+    current_ver=$(get_current_version)
+
+    if [ "$current_ver" = "$target_ver" ]; then
+        info "Ruby $target_ver is already installed and active."
+        return 0
+    fi
+
+    if rbenv versions --bare | grep -qx "$target_ver"; then
+        warn "Ruby $target_ver is installed but not active. Setting as global..."
+        rbenv global "$target_ver"
+        rbenv rehash
+        info "Ruby $target_ver is now active."
+        return 0
+    fi
+
+    update_ruby_build
+
+    if ! rbenv install --list 2>/dev/null | grep -qw "$target_ver"; then
+        fatal "Ruby $target_ver is not available. Run 'tkl-upgrade-ruby --available' to see options."
+    fi
+
+    header "Installing Ruby $target_ver (current: $current_ver)..."
+    echo "This will compile Ruby from source. It may take several minutes."
+    echo ""
+
+    MAKE_OPTS="-j$(nproc)" \
+        RUBY_CONFIGURE_OPTS="--with-jemalloc --disable-install-doc" \
+        rbenv install "$target_ver"
+
+    rbenv global "$target_ver"
+    rbenv rehash
+
+    gem update --system --silent
+    gem install --no-document bundler
+
+    info "Ruby $target_ver installed and set as global."
+    echo ""
+    echo "Current Ruby: $(ruby --version)"
+}
+
+cleanup_old() {
+    local current_ver
+    current_ver=$(get_current_version)
+
+    header "Installed Ruby versions:"
+    rbenv versions --bare
+
+    echo ""
+    echo "Current active version: $current_ver"
+    echo ""
+
+    local old_versions
+    old_versions=$(rbenv versions --bare | grep -v "^${current_ver}$")
+
+    if [ -z "$old_versions" ]; then
+        info "No old versions to remove."
+        return 0
+    fi
+
+    echo "The following versions can be removed:"
+    echo "$old_versions"
+    echo ""
+
+    read -rp "Remove all old versions? [y/N] " confirm
+    if [ "$confirm" = "y" ] || [ "$confirm" = "Y" ]; then
+        echo "$old_versions" | while IFS= read -r ver; do
+            echo "Removing Ruby $ver..."
+            rbenv uninstall -f "$ver"
+        done
+        info "Cleanup complete."
+    else
+        echo "Cleanup cancelled."
+    fi
+}
+
+interactive_mode() {
+    local current_ver
+    current_ver=$(get_current_version)
+
+    header "TurnKey Linux Ruby Upgrade Helper"
+    echo ""
+    echo "Current Ruby version: $current_ver"
+    echo "rbenv root: $RBENV_ROOT"
+    echo ""
+
+    local app_paths=("/home/mastodon/live" "/var/www/railsapp" "/var/www/redmine")
+    local detected_ver=""
+    local detected_path=""
+
+    for app_path in "${app_paths[@]}"; do
+        if [ -f "$app_path/.ruby-version" ]; then
+            detected_ver=$(get_app_version "$app_path")
+            detected_path="$app_path"
+            break
+        fi
+    done
+
+    if [ -n "$detected_ver" ]; then
+        echo "Detected .ruby-version in $detected_path: $detected_ver"
+        echo ""
+        if [ "$detected_ver" = "$current_ver" ]; then
+            info "Ruby is already at the required version."
+            return 0
+        fi
+        read -rp "Install Ruby $detected_ver? [Y/n] " confirm
+        if [ "$confirm" != "n" ] && [ "$confirm" != "N" ]; then
+            install_ruby "$detected_ver"
+            return 0
+        fi
+    fi
+
+    echo ""
+    read -rp "Enter Ruby version to install (or 'list' for available): " input
+
+    if [ "$input" = "list" ]; then
+        list_available
+        echo ""
+        read -rp "Enter Ruby version to install: " input
+    fi
+
+    install_ruby "$input"
+}
+
+usage() {
+    echo "Usage: tkl-upgrade-ruby [OPTIONS] [VERSION]"
+    echo ""
+    echo "Options:"
+    echo "  --app PATH    Read target version from PATH/.ruby-version"
+    echo "  --list        List installed Ruby versions"
+    echo "  --available   List available Ruby versions"
+    echo "  --cleanup     Remove old Ruby versions"
+    echo "  --help        Show this help"
+    echo ""
+    echo "Examples:"
+    echo "  tkl-upgrade-ruby                         Interactive mode"
+    echo "  tkl-upgrade-ruby 3.4.7                   Install specific version"
+    echo "  tkl-upgrade-ruby --app /home/mastodon/live"
+    echo "  tkl-upgrade-ruby --cleanup"
+}
+
+check_root
+check_rbenv
+
+case "${1:-}" in
+    --list)
+        list_installed
+        ;;
+    --available)
+        list_available
+        ;;
+    --cleanup)
+        cleanup_old
+        ;;
+    --app)
+        if [ -z "${2:-}" ]; then
+            fatal "Missing path argument for --app"
+        fi
+        target=$(get_app_version "$2")
+        if [ -z "$target" ]; then
+            fatal "No .ruby-version found in $2"
+        fi
+        install_ruby "$target"
+        ;;
+    --help|-h)
+        usage
+        ;;
+    "")
+        interactive_mode
+        ;;
+    *)
+        install_ruby "$1"
+        ;;
+esac
